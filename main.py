@@ -16,7 +16,7 @@ args = {
     't_range': 10,
     'mode': 8, 
     'lr': 1e-3,
-    'alpha': 0.
+    'alpha': 0.25
 }
 
 
