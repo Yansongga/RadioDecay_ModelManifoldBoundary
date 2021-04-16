@@ -46,7 +46,6 @@ A, l = (params[:, 0] + 0.).unsqueeze(1), (params[:, 1] + 0.).unsqueeze(1)
 def f( x, A, l ):
     h = ( - torch.matmul( x, l.T) ).exp()
     return torch.matmul( h, A )
-    #return (h * A).sum(1)
 
 # loss is a scale 
 def lossFunction(y, f):
@@ -70,7 +69,6 @@ def hessian( x, A, l, v ):
     Al_grad = torch.matmul(v.T, - x * h ).T
     ll_grad = ( torch.matmul( x**2, A.T) ) * h
     ll_grad = torch.matmul(v.T, ll_grad ).T
-    #return AA_grad.T, Al_grad.T, ll_grad.T
     hes = torch.cat( ( AA_grad, Al_grad, Al_grad, ll_grad), 1 )
     return hes.view( args['mode'], 2, 2 )
 
@@ -82,10 +80,8 @@ def prod(hes, Agrad, lgrad, v):
     
 def kernel_decomp( Agrad, lgrad ):
     kernel = torch.matmul( Agrad, Agrad.T) + torch.matmul( lgrad, lgrad.T)
-    #w, v = torch.linalg.eigh(kernel)
     w, v = torch.symeig(kernel, eigenvectors=True)
     k = w.size()[0] - 3
-    #return w[0], v[:, 0]
     return w[k], v[:, k].unsqueeze(1)
 
 
@@ -114,3 +110,4 @@ for step in range(args['steps']):
         
         print('[%5d]  eigenvalue: %.5f  trainloss: %.5f  testloss: %.5f' %
               (step + 1, w, trainloss, testloss/10  ))
+        
