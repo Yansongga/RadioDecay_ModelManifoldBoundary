@@ -1,0 +1,318 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[1]:
+
+
+import torch 
+import numpy as np
+import torchvision
+from torchvision import transforms
+from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt  
+from model import *
+import torch.optim as optim
+from autograd_hacks import *
+from autograd_hacks_test import *
+args = {
+    'dev': torch.device('cuda: 2' ),
+    'trainsize': 10,
+    'testsize': 100,
+    'steps': 100000,
+    't_range': 10,
+    'mode': 8, 
+    'lr': 1e-3,
+    'alpha': 0.
+}
+
+
+# In[2]:
+
+
+#sampling function 
+def real(t):
+    #a =[ 0.2, 0.3, 0.5, 0.1 ]
+    #l = [0.1, 0.15, 0.6, 0.02]
+    a = torch.tensor( [ [0.2],[0.3],[0.1],[0.5] ] ).to(args['dev'])
+    l = torch.tensor( [ [0.2],[0.21],[0.7],[0.19] ] ).to(args['dev'])
+    h = ( - torch.matmul( t, l.T) ).exp()
+    #y = 0. * t 
+    #for k in range(4):
+    #    y += a[k] * ( (- l[k] * t ).exp() )
+    return torch.matmul( h, a )
+
+t1, t2 = args['t_range'] * torch.rand(args['trainsize'], 1).to(args['dev']), args['t_range'] * torch.rand(args['testsize'], 1).to(args['dev'])
+
+#generating train and test set
+trainT = t1 + 0. 
+trainY = real( trainT )
+##
+
+testT = t2 + 0. 
+testY = real( testT )
+
+#initialize model 
+params = torch.rand(args['mode'], 2).to(args['dev'])
+A, l = (params[:, 0] + 0.).unsqueeze(1), (params[:, 1] + 0.).unsqueeze(1)
+
+
+# In[3]:
+
+
+A.shape
+
+
+# In[4]:
+
+
+#define functions, gradients(per sample), hessian 
+
+# f has size N x 1
+def f( x, A, l ):
+    h = ( - torch.matmul( x, l.T) ).exp()
+    return torch.matmul( h, A )
+    #return (h * A).sum(1)
+
+# loss is a scale 
+def lossFunction(y, f):
+    square = 0.5 * ( ( y - f )**2 )
+    return square.sum()
+
+# Agrad, lgrad  has size N x p, per sample gradient
+def fGradient(x, A, l):
+    Agrad = ( - torch.matmul( x, l.T) ).exp()
+    lgrad = (- torch.matmul( x, A.T) ) * Agrad
+    return Agrad, lgrad  
+
+def lossGradient( y, f, Agrad, lgrad ):
+    hA = torch.matmul( (y -f).T, Agrad)
+    hl = torch.matmul( (y -f).T, lgrad)
+    return -hA.T, -hl.T
+
+def hessian( x, A, l, v ):
+    h = ( - torch.matmul( x, l.T) ).exp()
+    AA_grad = torch.matmul( v.T, h * 0. ).T
+    Al_grad = torch.matmul(v.T, - x * h ).T
+    ll_grad = ( torch.matmul( x**2, A.T) ) * h
+    ll_grad = torch.matmul(v.T, ll_grad ).T
+    #return AA_grad.T, Al_grad.T, ll_grad.T
+    hes = torch.cat( ( AA_grad, Al_grad, Al_grad, ll_grad), 1 )
+    return hes.view( args['mode'], 2, 2 )
+
+def prod(hes, Agrad, lgrad, v):
+    vAgrad, vlgrad = torch.matmul( v.T, Agrad), torch.matmul( v.T, lgrad)
+    vec = torch.cat( (vAgrad.T, vlgrad.T), 1 ).unsqueeze(2)
+    prod = torch.matmul( hes, vec )
+    return prod[:, 0, :], prod[:, 1, :]
+    
+def kernel_decomp( Agrad, lgrad ):
+    kernel = torch.matmul( Agrad, Agrad.T) + torch.matmul( lgrad, lgrad.T)
+    #w, v = torch.linalg.eigh(kernel)
+    w, v = torch.symeig(kernel, eigenvectors=True)
+    k = w.size()[0] - 3
+    #return w[0], v[:, 0]
+    return w[k], v[:, k].unsqueeze(1)
+
+
+# In[ ]:
+
+
+
+
+
+# In[5]:
+
+
+###train with regulizer
+for step in range(args['steps']):
+    trainF = f( trainT, A, l ) 
+    Agrad, lgrad = fGradient(trainT, A, l)
+    w, v = kernel_decomp( Agrad, lgrad )
+    hes = hessian( trainT, A, l, v )
+    
+    #gradient with respect to loss and eigenvalue
+    dA, dl = prod(hes, Agrad, lgrad, v)
+    loss_A, loss_l = lossGradient( trainY, trainF, Agrad, lgrad )
+    
+    #gradiend descent
+    A -= args['lr'] * ( loss_A / args['trainsize'] + args['alpha'] * dA )
+    l -= args['lr'] * ( loss_l / args['trainsize'] + args['alpha'] * dl )
+    
+    if (step + 1) % 2500 == 0 or step == 0:    # print every 1000 steps
+        testF = f( testT, A, l ) 
+        trainloss = lossFunction(trainY, trainF)
+        testloss = lossFunction(testY, testF)
+        
+        print('[%5d]  eigenvalue: %.5f  trainloss: %.5f  testloss: %.5f' %
+              (step + 1, w, trainloss, testloss/10  ))
+
+
+# In[6]:
+
+
+A
+
+
+# In[7]:
+
+
+l
+
+
+# In[12]:
+
+
+trainF.shape, A.shape, l.shape, trainT.shape, trainY.shape, Agrad.shape, lgrad.shape, v.shape, hes.shape, dA.shape
+
+
+# In[ ]:
+
+
+
+
+
+# In[6]:
+
+
+A
+
+
+# In[7]:
+
+
+l
+
+
+# In[6]:
+
+
+A
+
+
+# In[7]:
+
+
+l
+
+
+# In[7]:
+
+
+A
+
+
+# In[8]:
+
+
+l
+
+
+# In[4]:
+
+
+net = Radio(mode =6).to(args['dev'])
+optimizer = optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
+
+
+# In[5]:
+
+
+optimizer.zero_grad()
+pred = net.forward( trainT )
+SampleLoss = lossPerSample(trianY, pred)
+
+SampleLoss.retain_grad()
+SampleLoss.backward(gradient=torch.ones_like(SampleLoss))
+
+
+# In[6]:
+
+
+SampleLoss
+
+
+# In[5]:
+
+
+for step in range(args['steps']):
+    optimizer.zero_grad()
+    pred = net.forward( trainT )
+    loss = lossFunction(trianY, pred) 
+    
+    autograd_hacks.add_hooks(net)
+    loss.backward()
+    autograd_hacks.compute_grad1(net)
+    for param in net.parameters():
+        assert(torch.allclose(param.grad1.mean(dim=0), param.grad))
+    
+    optimizer.step()
+    
+    ##per sample gradient 
+    #optimizer.zero_grad()
+    #SampleLoss = lossPerSample(trianY, pred)
+    #SampleLoss.backward(gradient=SampleLoss)
+    
+    
+    if (step + 1) % 1000 == 0:    # print every 100 steps
+        print('[%d, %5d] loss: %.3f' %
+              (0, step + 1, loss  ))
+        testPred = net( testT )
+        testloss = lossFunction(testY, testPred) 
+        print('[%d, %5d] loss: %.3f' %
+              (1, step + 1, testloss ))
+
+print('Finished Training')
+
+
+# In[ ]:
+
+
+
+
+
+# In[7]:
+
+
+trianY
+
+
+# In[8]:
+
+
+net(trainT)
+
+
+# In[9]:
+
+
+net.l.weight
+
+
+# In[ ]:
+
+
+for epoch in range(2):  # loop over the dataset multiple times
+
+    running_loss = 0.0
+    for i, data in enumerate(trainloader, 0):
+        # get the inputs; data is a list of [inputs, labels]
+        inputs, labels = data
+
+        # zero the parameter gradients
+        optimizer.zero_grad()
+
+        # forward + backward + optimize
+        outputs = net(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        # print statistics
+        running_loss += loss.item()
+        if i % 2000 == 1999:    # print every 2000 mini-batches
+            print('[%d, %5d] loss: %.3f' %
+                  (epoch + 1, i + 1, running_loss / 2000))
+            running_loss = 0.0
+
+print('Finished Training')
+
